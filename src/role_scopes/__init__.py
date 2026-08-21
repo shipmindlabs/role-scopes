@@ -16,21 +16,39 @@ from role_scopes.checks import (
     check,
     require,
 )
+from role_scopes.scopes import (
+    ACTOR_SCOPES,
+    RESOURCES,
+    MissingScopeKey,
+    Scope,
+    ScopeKind,
+    resource_of,
+    scope_for,
+    scope_queryset,
+)
 
 __all__ = [
     "ACTOR_PERMISSIONS",
+    "ACTOR_SCOPES",
+    "RESOURCES",
     "Actor",
     "Decision",
     "Denial",
+    "MissingScopeKey",
     "Permission",
     "PermissionDenied",
     "Rule",
+    "Scope",
+    "ScopeKind",
     "__version__",
     "actors_with",
     "check",
     "has_permission",
     "permissions_for",
     "require",
+    "resource_of",
+    "scope_for",
+    "scope_queryset",
 ]
 
 __version__ = "0.1.0"
