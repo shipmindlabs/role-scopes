@@ -6,8 +6,8 @@ ownership checks.
 
 ## Status
 
-Early: the permission matrix, explainable permission checks and queryset
-scoping are in place; object ownership checks are next.
+Early: the permission matrix, explainable permission checks, queryset scoping
+and object ownership checks are in place.
 
 ## Installation
 
@@ -87,6 +87,44 @@ The permission is checked before the slice is applied: an actor without the
 capability, or a resource with no slice declared for that actor, gets an empty
 queryset. A principal missing an attribute the slice filters on raises
 `MissingScopeKey` rather than silently widening or emptying the result.
+
+### Object ownership
+
+A permission says what an actor may do; it never says which objects are theirs.
+The worth naming mistake this closes: detail and action endpoints checked the
+role and stopped there — a courier may deliver shipments — without asking
+whether *this* shipment was assigned to *that* courier, so any courier could
+act on any order that reached its URL.
+
+`check_object()` asks both questions against the slice already declared for
+queryset scoping, so the row a list view hides is the row a detail view
+refuses:
+
+```python
+from role_scopes import Permission, check_object, owns, require_object
+
+owns("courier", Permission.SHIPMENT_DELIVER, shipment, request.user)
+# True only when shipment.courier_id == request.user.courier_id
+
+decision = check_object("courier", "order.view", someone_elses_order, request.user)
+str(decision.denial)
+# 'courier may not order.view: this order is outside order.own_assignment [object.owned]'
+```
+
+`require_object()` raises the same `PermissionDenied` as `require()`, so a view
+renders one error body for both failures:
+
+```python
+require_object(request.user.role, Permission.SHIPMENT_DELIVER, shipment, request.user)
+```
+
+Ownership failures carry the `object.owned` rule, which separates "you may not
+do this at all" from "not on this row" in logs. Lookups spanning relations are
+followed on the object the way the queryset would join them, so a courier's
+reach over an order is decided by `order.shipment.courier_id`. An actor whose
+slice is `everything` reaches every row, a resource with no declared slice
+reaches none, and an object missing the field the slice narrows on raises
+`MissingObjectKey` rather than passing quietly.
 
 ## License
 

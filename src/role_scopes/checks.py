@@ -25,11 +25,12 @@ __all__ = [
 
 
 class Rule(str, Enum):
-    """Rule consulted by :func:`check`, listed in the order it is applied."""
+    """Rule consulted by a check, listed in the order it is applied."""
 
     ACTOR_KNOWN = "actor.known"
     ACTION_KNOWN = "action.known"
     PERMISSION_GRANTED = "permission.granted"
+    OBJECT_OWNED = "object.owned"
 
 
 @dataclass(frozen=True, slots=True)

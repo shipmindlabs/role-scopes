@@ -16,6 +16,12 @@ from role_scopes.checks import (
     check,
     require,
 )
+from role_scopes.ownership import (
+    MissingObjectKey,
+    check_object,
+    owns,
+    require_object,
+)
 from role_scopes.scopes import (
     ACTOR_SCOPES,
     RESOURCES,
@@ -34,6 +40,7 @@ __all__ = [
     "Actor",
     "Decision",
     "Denial",
+    "MissingObjectKey",
     "MissingScopeKey",
     "Permission",
     "PermissionDenied",
@@ -43,9 +50,12 @@ __all__ = [
     "__version__",
     "actors_with",
     "check",
+    "check_object",
     "has_permission",
+    "owns",
     "permissions_for",
     "require",
+    "require_object",
     "resource_of",
     "scope_for",
     "scope_queryset",
