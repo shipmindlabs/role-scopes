@@ -6,8 +6,8 @@ ownership checks.
 
 ## Status
 
-Early: the permission matrix, explainable permission checks, queryset scoping
-and object ownership checks are in place.
+Early: the permission matrix, explainable permission checks, queryset scoping,
+object ownership checks and the optional Django admin adapter are in place.
 
 ## Installation
 
@@ -125,6 +125,63 @@ reach over an order is decided by `order.shipment.courier_id`. An actor whose
 slice is `everything` reaches every row, a resource with no declared slice
 reaches none, and an object missing the field the slice narrows on raises
 `MissingObjectKey` rather than passing quietly.
+
+### Django admin, separated by role
+
+The checks above are declarations and functions. The adapter in
+`role_scopes.contrib.admin` is the optional layer that speaks Django's own
+vocabulary; nothing in the core imports it, and it belongs in an app's
+`admin.py` or a migration rather than in settings.
+
+Declared permissions get the names `auth` would give them, so a model can carry
+the domain actions Django does not create by itself:
+
+```python
+from role_scopes.contrib.admin import codename_for, model_permissions
+
+codename_for(Permission.ORDER_CANCEL)  # 'cancel_order'
+codename_for(Permission.ORDER_CREATE)  # 'add_order' — create is Django's add
+
+class Order(models.Model):
+    class Meta:
+        permissions = model_permissions("order")
+        # [('approve_return', ...)] style entries, minus the four Django adds
+```
+
+One group per actor holds exactly what the matrix grants it. `sync_groups()`
+replaces the group's permissions instead of adding to them, so it is safe to
+re-run from a data migration and a capability dropped from the matrix leaves
+the group with it:
+
+```python
+from role_scopes.contrib.admin import sync_groups
+
+APPS = {"order": "orders", "shipment": "orders", "inventory": "warehouse"}
+
+sync_groups(APPS)
+# {'role_scopes:courier': 4, 'role_scopes:warehouse': 6, ...}
+```
+
+Resources absent from the mapping are skipped, so a project may model only part
+of the matrix.
+
+A scoped admin narrows the changelist and refuses the rows outside the slice,
+which is what lets support and warehouse staff share one admin site:
+
+```python
+from role_scopes.contrib.admin import ScopedModelAdmin
+
+@admin.register(Shipment)
+class ShipmentAdmin(ScopedModelAdmin):
+    resource = "shipment"
+    change_permission = Permission.SHIPMENT_DELIVER
+```
+
+The actor is read from `request.user.role` (`actor_attribute` renames it), and a
+superuser without one is treated as back-office unless `superuser_actor` is set
+to `None`. View and add fall back to `<resource>.view` and `<resource>.create`;
+change and delete have no fallback, because the matrix names domain actions
+rather than CRUD, and an admin action with no permission mapped is refused.
 
 ## License
 
