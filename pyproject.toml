@@ -25,6 +25,9 @@ classifiers = [
 ]
 dependencies = ["django>=4.2"]
 
+[project.optional-dependencies]
+rest = ["djangorestframework>=3.14"]
+
 [project.urls]
 Homepage = "https://github.com/shipmindlabs/role-scopes"
 Source = "https://github.com/shipmindlabs/role-scopes"
@@ -32,3 +35,7 @@ Issues = "https://github.com/shipmindlabs/role-scopes/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/role_scopes"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

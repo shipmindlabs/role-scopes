@@ -7,12 +7,14 @@ ownership checks.
 ## Status
 
 Early: the permission matrix, explainable permission checks, queryset scoping,
-object ownership checks and the optional Django admin adapter are in place.
+object ownership checks and the optional Django admin and REST Framework
+adapters are in place.
 
 ## Installation
 
 ```bash
 pip install role-scopes
+pip install "role-scopes[rest]"  # with the Django REST Framework adapter
 ```
 
 ## Usage
@@ -125,6 +127,58 @@ reach over an order is decided by `order.shipment.courier_id`. An actor whose
 slice is `everything` reaches every row, a resource with no declared slice
 reaches none, and an object missing the field the slice narrows on raises
 `MissingObjectKey` rather than passing quietly.
+
+### Django REST Framework
+
+The adapter in `role_scopes.contrib.rest_framework` turns the same declarations
+into the objects a DRF view expects, so an endpoint stops hand-rolling the role
+checks its neighbours already spell out:
+
+```python
+from rest_framework import viewsets
+from role_scopes import Permission
+from role_scopes.contrib.rest_framework import ScopedQuerysetMixin, scoped_permission
+
+ShipmentAccess = scoped_permission(
+    "shipment",
+    {
+        "deliver": Permission.SHIPMENT_DELIVER,
+        "assign": Permission.SHIPMENT_ASSIGN,
+    },
+)
+
+
+class ShipmentViewSet(ScopedQuerysetMixin, viewsets.ModelViewSet):
+    queryset = Shipment.objects.all()
+    serializer_class = ShipmentSerializer
+    permission_classes = [ShipmentAccess]
+```
+
+Keys are viewset actions (`deliver`, `assign`) or HTTP methods (`POST`) for a
+plain `APIView`. `list` and `retrieve` fall back to `shipment.view` and `create`
+to `shipment.create`; `update`, `destroy` and every custom action must be
+mapped, because the matrix names domain actions rather than CRUD and an
+undeclared POST route would otherwise inherit `create`. An action with no
+permission mapped is refused rather than allowed, and a permission the matrix
+does not declare raises when the class is built, not on the first request that
+reaches the route.
+
+One class covers both questions DRF asks: `has_object_permission()` runs
+`check_object()` on the detail routes, and `ScopedQuerysetMixin` narrows the
+list with `scope_queryset()` from the same declaration, so a courier never sees
+a row it may not open and never opens a row it may not see.
+
+The denial is the 403 body:
+
+```python
+{'actor': 'courier', 'action': 'shipment.deliver', 'rule': 'object.owned',
+ 'reason': 'this shipment is outside shipment.own_assignment'}
+```
+
+DRF renders it from `permission.message`; a view or exception handler that wants
+the structured value reads `permission.denial`. The actor is read from
+`request.user.role` (`actor_attribute` renames it), and a request carrying no
+actor is denied as `anonymous` with the `actor.known` rule.
 
 ### Django admin, separated by role
 
