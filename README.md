@@ -17,6 +17,116 @@ pip install role-scopes
 pip install "role-scopes[rest]"  # with the Django REST Framework adapter
 ```
 
+## Multi-actor backends, done once
+
+A delivery backend looks like one product and answers to six audiences. The
+customer places an order and watches it move. The courier carries it. The
+warehouse picks it, assigns it and counts what is left on the shelf. Receiving
+takes pallets in from suppliers and never touches a customer order. Support
+answers for all of the above and has to see across every store and every route
+to do it. Back-office runs the business: refunds, reports, accounts.
+
+Five of them read the `order` table and no two of them read the same rows. That
+is the shape of the problem: *what may this actor do* and *which rows are
+theirs* are two different questions, and a backend that answers only the first
+one hands every courier the whole fleet.
+
+### Declaring the audiences
+
+Capabilities are one table, in `role_scopes.actors`. Permissions are named
+`<resource>.<action>` after the domain rather than after CRUD, because
+`shipment.reroute` is a thing support does and `PATCH` is not:
+
+```python
+class Actor(str, Enum):
+    CUSTOMER = "customer"
+    COURIER = "courier"
+    WAREHOUSE = "warehouse"
+    RECEIVING = "receiving"
+    SUPPORT = "support"
+    BACK_OFFICE = "back_office"
+
+
+ACTOR_PERMISSIONS = {
+    Actor.COURIER: frozenset(
+        {
+            Permission.ORDER_VIEW,
+            Permission.SHIPMENT_VIEW,
+            Permission.SHIPMENT_PICKUP,
+            Permission.SHIPMENT_DELIVER,
+        }
+    ),
+    # ...one row per actor; back-office holds frozenset(Permission)
+}
+```
+
+Reach is the second table, in `role_scopes.scopes`, keyed by actor and by the
+resource half of a permission. A slice is declared once and every
+`shipment.*` permission narrows through it:
+
+```python
+ACTOR_SCOPES = {
+    Actor.COURIER: {
+        "order": Scope.owned("order.own_assignment", shipment__courier_id="courier_id"),
+        "shipment": Scope.owned("shipment.own_assignment", courier_id="courier_id"),
+    },
+    Actor.WAREHOUSE: {
+        "order": Scope.owned("order.own_store", store_id="store_id"),
+        "inventory": Scope.owned("inventory.own_store", store_id="store_id"),
+    },
+    Actor.SUPPORT: {
+        "order": Scope.EVERYTHING,
+        "shipment": Scope.EVERYTHING,
+    },
+}
+```
+
+A slice has three shapes: `Scope.EVERYTHING` for the actors that answer for the
+whole business, `Scope.owned()` for a filter resolved from the acting principal,
+and nothing at all — an undeclared resource is `Scope.NOTHING`, so receiving
+reaches no orders because nobody wrote down that it should. Visibility is
+granted, never inherited.
+
+Adding the seventh audience is a row in each table. No view changes, because no
+view spells a rule out for itself.
+
+### The ownership trap
+
+Here is the endpoint that ships in most multi-actor backends on the first pass:
+
+```python
+@api_view(["POST"])
+def deliver(request, shipment_id):
+    require(request.user.role, Permission.SHIPMENT_DELIVER)
+    shipment = get_object_or_404(Shipment, pk=shipment_id)
+    shipment.mark_delivered()
+```
+
+The check is real and it passes for the wrong person. Every courier holds
+`shipment.deliver` — that is what makes them a courier — so courier 7 posting to
+shipment 8821, assigned to courier 12, marks somebody else's parcel delivered.
+The list endpoint was scoped correctly and never showed 8821 to courier 7, which
+is exactly what makes the bug survive review: hidden is not denied, and an id is
+an integer.
+
+The fix is to ask the second question against the same declaration the list used:
+
+```python
+@api_view(["POST"])
+def deliver(request, shipment_id):
+    shipment = get_object_or_404(Shipment, pk=shipment_id)
+    require_object(request.user.role, Permission.SHIPMENT_DELIVER, shipment, request.user)
+    shipment.mark_delivered()
+```
+
+The tempting shortcut — `if shipment.courier_id != request.user.courier_id:` in
+the view — is right for couriers and wrong for the other five audiences. Support
+reaches every shipment and would be locked out, warehouse owns by `store_id`,
+and the courier's reach over an *order* is not a column at all but
+`order.shipment.courier_id`. Written by hand it is six branches per endpoint,
+drifting apart one endpoint at a time; read from `ACTOR_SCOPES` it is one line
+that already agrees with the queryset.
+
 ## Usage
 
 Permissions are declared as data in one place and read by every check:
@@ -92,14 +202,8 @@ queryset. A principal missing an attribute the slice filters on raises
 
 ### Object ownership
 
-A permission says what an actor may do; it never says which objects are theirs.
-The worth naming mistake this closes: detail and action endpoints checked the
-role and stopped there — a courier may deliver shipments — without asking
-whether *this* shipment was assigned to *that* courier, so any courier could
-act on any order that reached its URL.
-
-`check_object()` asks both questions against the slice already declared for
-queryset scoping, so the row a list view hides is the row a detail view
+`check_object()` asks the ownership question against the slice already declared
+for queryset scoping, so the row a list view hides is the row a detail view
 refuses:
 
 ```python
