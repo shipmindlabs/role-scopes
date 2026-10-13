@@ -15,6 +15,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models import QuerySet
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
@@ -172,7 +173,10 @@ class ScopedQuerysetMixin:
     """Narrow a generic view's queryset by the slice its permission declares.
 
     Mixed in before the DRF view class, so the list a client reads and the
-    object it may open come from one declaration.
+    object it may open come from one declaration. A view that mixes this in
+    without a :class:`ScopedPermission` among its permissions raises
+    ``ImproperlyConfigured``: handing back the unscoped queryset would give a
+    courier the whole fleet by omission.
     """
 
     def get_queryset(self) -> QuerySet:
@@ -181,7 +185,11 @@ class ScopedQuerysetMixin:
         for permission in self.get_permissions():  # type: ignore[attr-defined]
             if isinstance(permission, ScopedPermission):
                 return permission.scoped_queryset(queryset, self.request, self)  # type: ignore[attr-defined]
-        return queryset
+        raise ImproperlyConfigured(
+            f"{type(self).__name__} mixes in ScopedQuerysetMixin but declares no "
+            f"ScopedPermission among its permission classes, so there is no slice "
+            f"to narrow by"
+        )
 
 
 def scoped_permission(

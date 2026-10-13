@@ -270,7 +270,10 @@ reaches the route.
 One class covers both questions DRF asks: `has_object_permission()` runs
 `check_object()` on the detail routes, and `ScopedQuerysetMixin` narrows the
 list with `scope_queryset()` from the same declaration, so a courier never sees
-a row it may not open and never opens a row it may not see.
+a row it may not open and never opens a row it may not see. A view that mixes
+the mixin in without a scoped permission class among its `permission_classes`
+raises `ImproperlyConfigured` naming the view, because the alternative is
+handing back the unscoped queryset: a scoping mixin never widens by omission.
 
 The denial is the 403 body:
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
 from role_scopes import Permission, Rule
 
@@ -74,6 +75,23 @@ class BaseView:
 
 class ShipmentView(ScopedQuerysetMixin, BaseView):
     pass
+
+
+class AnyoneMay:
+    """A permission class that knows nothing about the declarations."""
+
+    def has_permission(self, request: Any, view: Any) -> bool:
+        return True
+
+
+class UnscopedShipmentView(ScopedQuerysetMixin, BaseView):
+    def get_permissions(self) -> list[Any]:
+        return [AnyoneMay()]
+
+
+class MixedShipmentView(ScopedQuerysetMixin, BaseView):
+    def get_permissions(self) -> list[Any]:
+        return [AnyoneMay(), ShipmentAccess()]
 
 
 def courier(courier_id: int = 7) -> Principal:
@@ -166,6 +184,18 @@ def test_mixin_leaves_an_unscoped_actor_alone() -> None:
 def test_mixin_empties_the_list_without_an_actor() -> None:
     view = ShipmentView(Request(user=Principal()), action="list")
     assert view.get_queryset().empty
+
+
+def test_mixin_refuses_a_view_with_no_scoped_permission() -> None:
+    view = UnscopedShipmentView(Request(user=courier(7)), action="list")
+    with pytest.raises(ImproperlyConfigured) as raised:
+        view.get_queryset()
+    assert "UnscopedShipmentView" in str(raised.value)
+
+
+def test_mixin_narrows_through_a_scoped_permission_among_others() -> None:
+    view = MixedShipmentView(Request(user=courier(7)), action="list")
+    assert view.get_queryset().filters == {"courier_id": 7}
 
 
 def test_factory_rejects_declarations_the_matrix_does_not_know() -> None:
