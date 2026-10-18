@@ -32,6 +32,11 @@ from role_scopes.scopes import (
     scope_for,
     scope_queryset,
 )
+from role_scopes.verify import (
+    Finding,
+    FindingKind,
+    verify_declarations,
+)
 
 __all__ = [
     "ACTOR_PERMISSIONS",
@@ -40,6 +45,8 @@ __all__ = [
     "Actor",
     "Decision",
     "Denial",
+    "Finding",
+    "FindingKind",
     "MissingObjectKey",
     "MissingScopeKey",
     "Permission",
@@ -59,6 +66,7 @@ __all__ = [
     "resource_of",
     "scope_for",
     "scope_queryset",
+    "verify_declarations",
 ]
 
 __version__ = "0.1.0"

@@ -7,8 +7,8 @@ ownership checks.
 ## Status
 
 Early: the permission matrix, explainable permission checks, queryset scoping,
-object ownership checks and the optional Django admin and REST Framework
-adapters are in place.
+object ownership checks, the declaration lint and the optional Django admin and
+REST Framework adapters are in place.
 
 ## Installation
 
@@ -231,6 +231,30 @@ reach over an order is decided by `order.shipment.courier_id`. An actor whose
 slice is `everything` reaches every row, a resource with no declared slice
 reaches none, and an object missing the field the slice narrows on raises
 `MissingObjectKey` rather than passing quietly.
+
+### Linting the declarations
+
+Two tables that disagree still import. `verify_declarations()` reads them
+against each other and returns findings rather than raising, so a project fails
+its own test on the ones it cares about:
+
+```python
+from role_scopes import verify_declarations
+
+verify_declarations()  # the shipped tables
+# ()
+
+findings = verify_declarations(MY_PERMISSIONS, MY_SCOPES)
+[str(finding) for finding in findings]
+# ['courier is granted inventory.view but declares no inventory slice, so every row is denied [grant.without_slice]']
+```
+
+Three disagreements are reported. A grant whose resource has no slice reads as
+a capability and denies every row, which is a policy nobody wrote down. A slice
+no grant reaches narrows a queryset no view asks for. A slice keyed by a
+resource no permission names is a typo, and the resource it was meant for
+quietly falls back to `Scope.NOTHING`. An explicit `Scope.NOTHING` is not a
+finding: somebody wrote that one down.
 
 ### Django REST Framework
 
