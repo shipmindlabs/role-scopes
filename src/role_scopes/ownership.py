@@ -12,7 +12,13 @@ from typing import Any
 
 from role_scopes.actors import Actor, Permission
 from role_scopes.checks import Decision, Denial, PermissionDenied, Rule, check
-from role_scopes.scopes import ScopeKind, resource_of, scope_for
+from role_scopes.scopes import (
+    MEMBERSHIP_LOOKUP,
+    ScopeKind,
+    resource_of,
+    scope_for,
+    split_lookup,
+)
 
 __all__ = [
     "MissingObjectKey",
@@ -51,9 +57,11 @@ def check_object(
     The permission is checked first, then the object is compared against the
     slice declared for that actor and resource. An actor whose slice is
     ``everything`` reaches every row; a resource with no declared slice reaches
-    none. Raises :class:`~role_scopes.MissingScopeKey` when the principal does
-    not carry an attribute the slice filters on, and :class:`MissingObjectKey`
-    when the object does not carry the field the slice narrows on.
+    none. A lookup declared with a trailing ``in`` is answered as membership,
+    the way the queryset filters it. Raises
+    :class:`~role_scopes.MissingScopeKey` when the principal does not carry an
+    attribute the slice filters on, and :class:`MissingObjectKey` when the
+    object does not carry the field the slice narrows on.
     """
     decision = check(actor, action)
     if decision.denial is not None:
@@ -76,12 +84,18 @@ def check_object(
 
     expected = scope.filters(principal)
     for lookup, _attribute in scope.lookups:
-        value = _object_value(obj, lookup)
+        path, trailing = split_lookup(lookup)
+        value = _object_value(obj, path)
         if value is _MISSING:
             raise MissingObjectKey(
-                f"scope {scope.label!r} needs {lookup!r} on the {resource}"
+                f"scope {scope.label!r} needs {path!r} on the {resource}"
             )
-        if value != expected[lookup]:
+        inside = (
+            value in expected[lookup]
+            if trailing == MEMBERSHIP_LOOKUP
+            else value == expected[lookup]
+        )
+        if not inside:
             return denied(f"this {resource} is outside {scope.label}")
 
     return decision

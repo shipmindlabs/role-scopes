@@ -9,7 +9,7 @@ for the slice instead of restating the filter.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
@@ -22,20 +22,28 @@ from role_scopes.checks import check
 
 __all__ = [
     "ACTOR_SCOPES",
+    "MEMBERSHIP_LOOKUP",
+    "QUERY_LOOKUPS",
     "RESOURCES",
     "MissingScopeKey",
     "Scope",
+    "ScopeDeclarationError",
     "ScopeKind",
     "resource_of",
     "scope_for",
     "scope_queryset",
+    "split_lookup",
 ]
 
 _QuerySetT = TypeVar("_QuerySetT", bound=QuerySet)
 
 
 class MissingScopeKey(LookupError):
-    """The principal lacks an attribute a declared scope filters on."""
+    """The principal lacks a value a declared scope filters on."""
+
+
+class ScopeDeclarationError(ValueError):
+    """A declared slice names a lookup an ownership check cannot answer."""
 
 
 class ScopeKind(str, Enum):
@@ -46,13 +54,59 @@ class ScopeKind(str, Enum):
     NOTHING = "nothing"
 
 
+# Trailing segments Django reads as a lookup rather than as a field name.
+QUERY_LOOKUPS: frozenset[str] = frozenset(
+    {
+        "exact",
+        "iexact",
+        "in",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "range",
+        "isnull",
+        "contains",
+        "icontains",
+        "startswith",
+        "istartswith",
+        "endswith",
+        "iendswith",
+        "regex",
+        "iregex",
+        "overlap",
+        "contained_by",
+        "has_key",
+        "has_keys",
+        "has_any_keys",
+    }
+)
+
+MEMBERSHIP_LOOKUP = "in"
+
+
+def split_lookup(lookup: str) -> tuple[str, str | None]:
+    """Split a declared lookup into its field path and trailing lookup name.
+
+    ``store_id__in`` reads as the field ``store_id`` narrowed by membership,
+    while ``shipment__courier_id`` is a relation path carrying no lookup of its
+    own.
+    """
+    path, _, last = lookup.rpartition("__")
+    if path and last in QUERY_LOOKUPS:
+        return path, last
+    return lookup, None
+
+
 @dataclass(frozen=True)
 class Scope:
     """The rows of a resource an actor may reach.
 
     ``lookups`` pairs a queryset lookup with the attribute of the principal that
     fills it, so the declaration stays readable next to the permission and the
-    resolved filter can be logged.
+    resolved filter can be logged. A lookup ending in ``__in`` is read as
+    membership: the principal carries several values and every row carrying one
+    of them is theirs.
     """
 
     kind: ScopeKind
@@ -64,11 +118,31 @@ class Scope:
 
     @classmethod
     def owned(cls, label: str, **lookups: str) -> Scope:
-        """Declare a slice narrowed by attributes of the acting principal."""
+        """Declare a slice narrowed by attributes of the acting principal.
+
+        A lookup is a field path compared for equality, or a path with a
+        trailing ``in`` for a principal that reaches several of its values. Any
+        other trailing lookup raises :class:`ScopeDeclarationError` here: a
+        queryset could narrow by it, but ``check_object()`` would have no way of
+        answering the same question about a single row.
+        """
+        for lookup in lookups:
+            _, trailing = split_lookup(lookup)
+            if trailing is not None and trailing != MEMBERSHIP_LOOKUP:
+                raise ScopeDeclarationError(
+                    f"scope {label!r} declares {lookup!r}, and {trailing!r} is "
+                    f"not a lookup a slice may end with: narrow by equality or "
+                    f"by membership ({MEMBERSHIP_LOOKUP!r})"
+                )
         return cls(ScopeKind.OWN, label, tuple(lookups.items()))
 
     def filters(self, principal: Any) -> dict[str, Any]:
-        """Resolve the declared lookups against ``principal``."""
+        """Resolve the declared lookups against ``principal``.
+
+        A membership lookup resolves to a tuple, so the same values narrow a
+        queryset and answer an object check. An empty one is a principal that
+        reaches no rows, which is not the same answer as a missing attribute.
+        """
         resolved: dict[str, Any] = {}
         for lookup, attribute in self.lookups:
             value = _principal_value(principal, attribute)
@@ -76,8 +150,21 @@ class Scope:
                 raise MissingScopeKey(
                     f"scope {self.label!r} needs {attribute!r} on the principal"
                 )
+            _, trailing = split_lookup(lookup)
+            if trailing == MEMBERSHIP_LOOKUP:
+                value = self._membership(attribute, value)
             resolved[lookup] = value
         return resolved
+
+    def _membership(self, attribute: str, value: Any) -> tuple[Any, ...]:
+        # A string is iterable, and reading one as a collection of characters
+        # would widen the slice to every row sharing a character with it.
+        if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+            raise MissingScopeKey(
+                f"scope {self.label!r} needs {attribute!r} on the principal to be "
+                f"a collection of values, not {type(value).__name__}"
+            )
+        return tuple(value)
 
     def __str__(self) -> str:
         return self.label
