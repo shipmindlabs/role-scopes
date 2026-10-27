@@ -200,6 +200,49 @@ capability, or a resource with no slice declared for that actor, gets an empty
 queryset. A principal missing an attribute the slice filters on raises
 `MissingScopeKey` rather than silently widening or emptying the result.
 
+### Set-valued principals
+
+A principal is not always one store. A regional operator covers several, and a
+slice says so with a trailing `in`:
+
+```python
+ACTOR_SCOPES = {
+    Actor.WAREHOUSE: {
+        "order": Scope.owned("order.own_stores", store_id__in="store_ids"),
+        "inventory": Scope.owned(
+            "inventory.own_stores",
+            store_id__in="store_ids",
+            sku_family="sku_family",
+        ),
+    },
+}
+```
+
+`store_ids` is read from the principal and resolved to a tuple, so one line
+answers both questions: the queryset filters by membership and `check_object()`
+tests the row against the same values.
+
+```python
+scope_queryset(Order.objects.all(), "warehouse", Permission.ORDER_VIEW, request.user)
+# Order.objects.filter(store_id__in=(3, 7))
+
+owns("warehouse", Permission.ORDER_VIEW, order, request.user)
+# True when order.store_id is one of request.user.store_ids
+```
+
+An empty collection is a principal that reaches no rows, which is a different
+answer from a principal that carries no collection at all: the first narrows to
+nothing, the second raises `MissingScopeKey`. A string is refused rather than
+read as a collection of characters, because that would widen the slice to every
+row sharing one.
+
+Membership and equality mix in a single slice, and a relation path carries it
+the same way (`order__store_id__in`). Any other trailing lookup — `__gte`,
+`__isnull`, `__icontains` — raises `ScopeDeclarationError` where it is
+declared: a queryset could narrow by it, but an ownership check has no way to
+ask the same question of one row, and half a slice denies the detail route the
+list route just showed.
+
 ### Object ownership
 
 `check_object()` asks the ownership question against the slice already declared
