@@ -16,6 +16,10 @@ def pytest_configure() -> None:
         INSTALLED_APPS=[
             "django.contrib.contenttypes",
             "django.contrib.auth",
+            # The admin adapter imports ``django.contrib.admin``, whose own
+            # models have to belong to an installed app. SimpleAdminConfig
+            # keeps the import from autodiscovering project admin modules.
+            "django.contrib.admin.apps.SimpleAdminConfig",
         ],
         USE_TZ=True,
     )
