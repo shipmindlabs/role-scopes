@@ -22,6 +22,15 @@ from role_scopes.ownership import (
     owns,
     require_object,
 )
+from role_scopes.principals import (
+    NO_ACTOR,
+    check_any,
+    check_object_any,
+    owns_any,
+    require_any,
+    require_object_any,
+    scope_queryset_any,
+)
 from role_scopes.scopes import (
     ACTOR_SCOPES,
     RESOURCES,
@@ -42,6 +51,7 @@ from role_scopes.verify import (
 __all__ = [
     "ACTOR_PERMISSIONS",
     "ACTOR_SCOPES",
+    "NO_ACTOR",
     "RESOURCES",
     "Actor",
     "Decision",
@@ -59,15 +69,21 @@ __all__ = [
     "__version__",
     "actors_with",
     "check",
+    "check_any",
     "check_object",
+    "check_object_any",
     "has_permission",
     "owns",
+    "owns_any",
     "permissions_for",
     "require",
+    "require_any",
     "require_object",
+    "require_object_any",
     "resource_of",
     "scope_for",
     "scope_queryset",
+    "scope_queryset_any",
     "verify_declarations",
 ]
 
