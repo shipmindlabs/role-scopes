@@ -31,6 +31,7 @@ class Rule(str, Enum):
     ACTION_KNOWN = "action.known"
     PERMISSION_GRANTED = "permission.granted"
     OBJECT_OWNED = "object.owned"
+    PAYLOAD_SCOPED = "payload.scoped"
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,8 +7,8 @@ ownership checks.
 ## Status
 
 Early: the permission matrix, explainable permission checks, queryset scoping,
-object ownership checks, the declaration lint and the optional Django admin and
-REST Framework adapters are in place.
+object ownership checks, write scoping for create routes, the declaration lint
+and the optional Django admin and REST Framework adapters are in place.
 
 ## Installation
 
@@ -274,6 +274,54 @@ reach over an order is decided by `order.shipment.courier_id`. An actor whose
 slice is `everything` reaches every row, a resource with no declared slice
 reaches none, and an object missing the field the slice narrows on raises
 `MissingObjectKey` rather than passing quietly.
+
+### Scoping a write
+
+A create route asks the ownership question about a row that does not exist yet,
+so nothing can be fetched and compared. The values are read from the same slice
+instead, which is what makes the `store_id` an operator may not see the one it
+may not write either:
+
+```python
+from role_scopes import Permission, check_payload, scope_defaults, scope_payload
+
+# request.user carries `customer_id`
+scope_payload("customer", Permission.ORDER_CREATE, {"total": "24.90"}, request.user)
+# {'total': '24.90', 'customer_id': 5}
+
+scope_defaults("customer", Permission.ORDER_CREATE, request.user)
+# {'customer_id': 5}
+```
+
+`scope_payload()` checks the capability, refuses a payload naming a value
+outside the slice and fills the fields it left out. `scope_defaults()` is the
+same values on their own, for a view that stamps them as it saves:
+
+```python
+def perform_create(self, serializer):
+    actor = self.request.user.role
+    serializer.save(**scope_defaults(actor, Permission.ORDER_CREATE, self.request.user))
+```
+
+A payload planting the row in somebody else's slice is denied with the
+`payload.scoped` rule, so a create route logs its refusals the way a detail
+route does:
+
+```python
+decision = check_payload("customer", "order.create", {"customer_id": 9}, request.user)
+str(decision.denial)
+# "customer may not order.create: 'customer_id' places this new order outside order.own_customer [payload.scoped]"
+```
+
+`check_payload()` answers about the values a payload carries, so a field it
+leaves out is not a denial — that is the field `scope_defaults()` fills, which
+is why a create route uses the pair rather than the check alone. Three slices
+name no value a single new row could carry, and all three raise
+`UnstampableScope` where the write is scoped rather than inventing one: a
+resource with no declared slice, a lookup spanning a relation (the value belongs
+to the related row), and a membership slice, because a principal covering
+several stores does not say which one a new row belongs to. The payload names
+that one itself and the check tests it against the set.
 
 ### Linting the declarations
 
